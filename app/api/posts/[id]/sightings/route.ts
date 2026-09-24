@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSighting, getSightings } from '@/lib/data/posts';
 import { validateNewSighting } from '@/lib/data/validation';
+import { currentUserId } from '@/lib/auth/session';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -19,10 +20,12 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
 // POST /api/posts/[id]/sightings
 export async function POST(request: NextRequest, { params }: Ctx) {
     const { id } = await params;
+    const userId = await currentUserId();
+    if (!userId) return NextResponse.json({ error: 'Entre na sua conta para registrar um avistamento' }, { status: 401 });
     const parsed = validateNewSighting(await request.json().catch(() => null));
     if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
     try {
-        const sighting = await createSighting(id, parsed.value, null);
+        const sighting = await createSighting(id, parsed.value, userId);
         if (!sighting) return NextResponse.json({ error: 'Post não encontrado' }, { status: 404 });
         return NextResponse.json(sighting, { status: 201 });
     } catch (err) {

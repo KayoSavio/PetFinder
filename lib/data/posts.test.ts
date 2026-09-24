@@ -55,7 +55,7 @@ describe('posts', () => {
 
     it('não lista resolvidos por padrão', async () => {
         const p = await createPost(input(), null);
-        await updatePostStatus(p.id, 'resolved');
+        await updatePostStatus(p.id, 'resolved', null);
         expect((await listPosts({})).total).toBe(0);
         expect((await listPosts({ status: 'resolved' })).total).toBe(1);
     });
@@ -81,5 +81,14 @@ describe('posts', () => {
         const p = await createPost(input(), null);
         expect(p.event_datetime).toBe(p.created_at);
         expect(Number.isNaN(new Date(p.event_datetime).getTime())).toBe(false);
+    });
+
+    it('guarda o autor e só ele muda o status', async () => {
+        const p = await createPost(input(), 'user-a');
+        expect(p.user_id).toBe('user-a');
+        expect(await updatePostStatus(p.id, 'resolved', 'user-b')).toBe('forbidden');
+        expect((await getPost(p.id))!.status).toBe('active');
+        const done = await updatePostStatus(p.id, 'resolved', 'user-a');
+        expect(done !== 'forbidden' && done?.status).toBe('resolved');
     });
 });

@@ -2,6 +2,7 @@ import { after, NextRequest, NextResponse } from 'next/server';
 import { createPost, listPosts } from '@/lib/data/posts';
 import { validateNewPost } from '@/lib/data/validation';
 import { triggerEmbeddings } from '@/lib/ai';
+import { currentUserId } from '@/lib/auth/session';
 import type { PostStatus, PostType, PostUrgency } from '@/types';
 
 function dbError(err: unknown) {
@@ -52,13 +53,15 @@ export async function GET(request: NextRequest) {
 
 // POST /api/posts
 export async function POST(request: NextRequest) {
+    const userId = await currentUserId();
+    if (!userId) return NextResponse.json({ error: 'Entre na sua conta para publicar' }, { status: 401 });
+
     const body = await request.json().catch(() => null);
     const parsed = validateNewPost(body);
     if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
 
     try {
-        // Sem login ainda: user_id NULL (o plano do Neon Auth preenche)
-        const post = await createPost(parsed.value, null);
+        const post = await createPost(parsed.value, userId);
         if (post.photos.length > 0) after(() => triggerEmbeddings(post.id, post.photos));
         return NextResponse.json(post, { status: 201 });
     } catch (err) {

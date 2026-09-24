@@ -125,10 +125,13 @@ export async function createPost(input: NewPostInput, userId: string | null): Pr
     return (await getPost((rows[0] as Row).id as string))!;
 }
 
-export async function updatePostStatus(id: string, status: PostStatus): Promise<Post | null> {
-    if (!isUuid(id)) return null;
-    const rows = await sql().query(`UPDATE posts SET status = $2 WHERE id = $1 RETURNING id`, [id, status]);
-    return rows.length ? getPost(id) : null;
+/** Muda o status do post. Só o autor pode: outra pessoa recebe 'forbidden'. */
+export async function updatePostStatus(id: string, status: PostStatus, userId: string | null): Promise<Post | null | 'forbidden'> {
+    const post = await getPost(id);
+    if (!post) return null;
+    if (post.user_id !== (userId ?? '')) return 'forbidden';
+    await sql().query(`UPDATE posts SET status = $2 WHERE id = $1`, [id, status]);
+    return getPost(id);
 }
 
 export async function getSightings(postId: string): Promise<Sighting[]> {

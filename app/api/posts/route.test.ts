@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { afterCallbacks, triggerEmbeddings } = vi.hoisted(() => ({
+const { afterCallbacks, triggerEmbeddings, session } = vi.hoisted(() => ({
     afterCallbacks: [] as (() => unknown)[],
     triggerEmbeddings: vi.fn(async (..._args: unknown[]) => {}),
+    session: { userId: 'user-1' as string | null },
 }));
+vi.mock('@/lib/auth/session', () => ({ currentUserId: async () => session.userId }));
 vi.mock('next/server', async (orig) => ({
     ...(await orig<typeof import('next/server')>()),
     after: (cb: () => unknown) => { afterCallbacks.push(cb); },
@@ -23,6 +25,7 @@ function req(body: unknown) {
 
 beforeEach(async () => {
     afterCallbacks.length = 0;
+    session.userId = 'user-1';
     triggerEmbeddings.mockClear();
     await sql().query('TRUNCATE posts CASCADE');
 });
@@ -41,5 +44,18 @@ describe('POST /api/posts', () => {
     it('data inválida → 400 (não 503)', async () => {
         const res = await POST(req({ type: 'lost', title: 'x', species: 'Gato', pin_lat: 0, pin_lng: 0, event_datetime: 'ontem' }));
         expect(res.status).toBe(400);
+    });
+
+    it('sem login → 401 e nada é salvo', async () => {
+        session.userId = null;
+        const res = await POST(req({ type: 'lost', title: 'Luna', species: 'Cachorro', pin_lat: -23.5, pin_lng: -46.6 }));
+        expect(res.status).toBe(401);
+        const rows = await sql().query('SELECT COUNT(*)::int AS n FROM posts');
+        expect((rows[0] as { n: number }).n).toBe(0);
+    });
+
+    it('com login o post guarda o autor', async () => {
+        const res = await POST(req({ type: 'lost', title: 'Luna', species: 'Cachorro', pin_lat: -23.5, pin_lng: -46.6 }));
+        expect((await res.json()).user_id).toBe('user-1');
     });
 });

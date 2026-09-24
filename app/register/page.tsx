@@ -2,20 +2,44 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { authClient } from '@/lib/auth/client';
+import { authErrorMessage, safeNext } from '@/lib/auth/messages';
 
 export default function RegisterPage() {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const router = useRouter();
 
-    const handleSubmit = (e: React.FormEvent) => {
+    // Para onde voltar depois de entrar (?next=/posts/new); só caminhos do próprio app
+    const nextPath = () => safeNext(new URLSearchParams(window.location.search).get('next'));
+
+    const signInWithGoogle = async () => {
+        setError(null);
+        const { error } = await authClient.signIn.social({ provider: 'google', callbackURL: nextPath() });
+        if (error) setError(authErrorMessage(error));
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
-        setTimeout(() => {
-            alert('✅ Conta criada! (mock — o login real com Neon Auth chega na próxima etapa)');
+        setError(null);
+        try {
+            const { error } = await authClient.signUp.email({ name, email, password });
+            if (error) {
+                setError(authErrorMessage(error));
+                return;
+            }
+            router.push(nextPath());
+            router.refresh();
+        } catch {
+            setError('Sem conexão com o servidor. Tente de novo.');
+        } finally {
             setLoading(false);
-        }, 1000);
+        }
     };
 
     return (
@@ -39,7 +63,7 @@ export default function RegisterPage() {
                 </div>
 
                 {/* Google OAuth */}
-                <button className="btn btn-secondary" style={{ width: '100%', padding: '0.75rem', background: 'white', border: '1px solid var(--border-medium)', color: 'var(--text-primary)', fontWeight: 600 }}>
+                <button type="button" onClick={signInWithGoogle} className="btn btn-secondary" style={{ width: '100%', padding: '0.75rem', background: 'white', border: '1px solid var(--border-medium)', color: 'var(--text-primary)', fontWeight: 600 }}>
                     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.797 2.716v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4" />
                         <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.909-2.259c-.806.54-1.837.86-3.047.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853" />
@@ -83,11 +107,11 @@ export default function RegisterPage() {
                         <input
                             type="password"
                             className="input"
-                            placeholder="Mínimo 6 caracteres"
+                            placeholder="Mínimo 8 caracteres"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             required
-                            minLength={6}
+                            minLength={8}
                         />
                     </div>
                     <button
@@ -101,6 +125,11 @@ export default function RegisterPage() {
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: 'var(--space-md)' }}>
                         Ao criar uma conta, você concorda com nossos Termos de Serviço.
                     </p>
+                    {error && (
+                        <p role="alert" style={{ color: 'var(--color-lost)', fontSize: '0.875rem', marginTop: 'var(--space-md)', textAlign: 'center' }}>
+                            {error}
+                        </p>
+                    )}
                 </form>
 
                 <p style={{ textAlign: 'center', marginTop: 'var(--space-xl)', fontSize: '0.9375rem', color: 'var(--text-secondary)' }}>
