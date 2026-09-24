@@ -3,9 +3,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Supabase
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+# Banco (Neon Postgres)
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 # Modelo de embedding — DINOv2 (melhor que CLIP para distinguir indivíduos)
 DINO_MODEL_NAME = "facebook/dinov2-small"

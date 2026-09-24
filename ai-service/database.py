@@ -1,43 +1,59 @@
 """
 Operações de banco de dados para embeddings de fotos.
-Usa o cliente Supabase para comunicar com o PostgreSQL + pgvector.
+Conecta direto no Neon (PostgreSQL + pgvector + PostGIS) via psycopg.
 """
 
-from supabase import create_client, Client
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
-from config import SUPABASE_URL, SUPABASE_KEY
+from config import DATABASE_URL
+
+_pool: ConnectionPool | None = None
+
+# Colunas do post devolvidas junto com os matches (sem a coluna geography crua)
+POST_COLUMNS = """
+    p.id::text AS id, p.user_id, p.type, p.status, p.urgency, p.title, p.description,
+    p.species, p.size, p.color_tags, p.event_datetime, p.pin_lat, p.pin_lng,
+    p.city, p.neighborhood, p.photos, p.contact_whatsapp, p.contact_phone,
+    p.created_at, p.updated_at
+"""
 
 
-def get_client() -> Client:
-    """Cria e retorna um cliente Supabase."""
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise ValueError(
-            "❌ SUPABASE_URL e SUPABASE_SERVICE_KEY devem estar configurados no .env"
+def get_pool() -> ConnectionPool:
+    """Pool de conexões criado sob demanda (lê DATABASE_URL na primeira chamada)."""
+    global _pool
+    if _pool is None:
+        if not DATABASE_URL:
+            raise ValueError("❌ DATABASE_URL deve estar configurado no .env")
+        _pool = ConnectionPool(
+            DATABASE_URL, min_size=1, max_size=5,
+            kwargs={"row_factory": dict_row}, open=True,
         )
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+    return _pool
 
 
-def save_embedding(post_id: str, photo_url: str, embedding: list[float]) -> dict:
-    """
-    Salva um embedding de foto no banco de dados.
-    
-    Args:
-        post_id: ID do post (UUID)
-        photo_url: URL da foto no storage
-        embedding: Vetor de embedding (512 dimensões)
-        
-    Returns:
-        Registro criado
-    """
-    client = get_client()
-    
-    result = client.table("photo_embeddings").insert({
-        "post_id": post_id,
-        "photo_url": photo_url,
-        "embedding": embedding,
-    }).execute()
-    
-    return result.data[0] if result.data else {}
+def close_pool() -> None:
+    global _pool
+    if _pool is not None:
+        _pool.close()
+        _pool = None
+
+
+def _vec(embedding: list[float]) -> str:
+    """Literal pgvector: '[0.1,0.2,...]'."""
+    return "[" + ",".join(f"{x:.7f}" for x in embedding) + "]"
+
+
+def save_embedding(post_id: str, photo_url: str, embedding: list[float], species: str | None = None) -> dict:
+    """Salva o embedding de uma foto. species: 'dog' | 'cat' | None."""
+    with get_pool().connection() as conn:
+        row = conn.execute(
+            """INSERT INTO photo_embeddings (post_id, photo_url, embedding, species)
+               VALUES (%s::uuid, %s, %s::vector, %s)
+               RETURNING id::text AS id, post_id::text AS post_id, photo_url, species""",
+            (post_id, photo_url, _vec(embedding), species),
+        ).fetchone()
+    return row or {}
 
 
 def find_similar_photos(
@@ -49,117 +65,56 @@ def find_similar_photos(
     radius_km: float | None = None,
     search_types: list[str] | None = None,
     exclude_post_id: str | None = None,
+    query_species: str | None = None,
 ) -> list[dict]:
-    """
-    Busca fotos similares usando a função match_photos do Supabase (pgvector).
-
-    Args:
-        query_embedding: Embedding da foto de consulta (384 dims)
-        match_threshold: Similaridade mínima (0-1)
-        match_count: Número máximo de resultados
-        lat/lng/radius_km: Filtro geográfico opcional (retorna distance_km)
-        search_types: Tipos de post a buscar, ex: ["lost", "help_request"]
-
-    Returns:
-        Lista de matches com post_id, photo_url, similarity e distance_km
-    """
-    client = get_client()
-
-    params = {
-        "query_embedding": query_embedding,
-        "match_threshold": match_threshold,
-        "match_count": match_count,
-        "query_lat": lat,
-        "query_lng": lng,
-        "max_distance_km": radius_km,
-        "search_types": search_types or ["lost", "help_request"],
-        "exclude_post_id": exclude_post_id,
-    }
-
-    result = client.rpc("match_photos", params).execute()
-
-    return result.data or []
+    """Busca fotos parecidas (pgvector) com filtro de tipo, distância e espécie."""
+    with get_pool().connection() as conn:
+        rows = conn.execute(
+            """SELECT id::text AS id, post_id::text AS post_id, photo_url, species, similarity, distance_km
+               FROM match_photos(%s::vector, %s::float8, %s::int, %s::float8, %s::float8,
+                                 %s::float8, %s::text[], %s::uuid, %s::text)""",
+            (
+                _vec(query_embedding), match_threshold, match_count, lat, lng, radius_km,
+                search_types or ["lost", "help_request"], exclude_post_id, query_species,
+            ),
+        ).fetchall()
+    return rows
 
 
 def get_embeddings_for_post(post_id: str) -> list[dict]:
-    """Busca os embeddings já salvos de um post (evita reprocessar a foto)."""
-    client = get_client()
-    result = (
-        client.table("photo_embeddings")
-        .select("id, photo_url, embedding")
-        .eq("post_id", post_id)
-        .execute()
-    )
-    return result.data or []
+    """Embeddings já salvos de um post (evita reprocessar a foto)."""
+    with get_pool().connection() as conn:
+        return conn.execute(
+            """SELECT id::text AS id, photo_url, embedding::text AS embedding, species
+               FROM photo_embeddings WHERE post_id = %s::uuid""",
+            (post_id,),
+        ).fetchall()
 
 
 def get_post_details(post_ids: list[str]) -> list[dict]:
-    """
-    Busca detalhes dos posts pelo ID.
-    
-    Args:
-        post_ids: Lista de UUIDs dos posts
-        
-    Returns:
-        Lista de posts com seus detalhes
-    """
+    """Detalhes dos posts pelo ID."""
     if not post_ids:
         return []
-    
-    client = get_client()
-    
-    result = (
-        client.table("posts")
-        .select("*")
-        .in_("id", post_ids)
-        .execute()
-    )
-    
-    return result.data or []
+    with get_pool().connection() as conn:
+        return conn.execute(
+            f"SELECT {POST_COLUMNS} FROM posts p WHERE p.id = ANY(%s::uuid[])",
+            (post_ids,),
+        ).fetchall()
 
 
 def delete_embeddings(post_id: str) -> None:
-    """
-    Remove todos os embeddings de um post (quando deletado ou atualizado).
-    
-    Args:
-        post_id: ID do post
-    """
-    client = get_client()
-    
-    client.table("photo_embeddings").delete().eq("post_id", post_id).execute()
+    """Remove todos os embeddings de um post."""
+    with get_pool().connection() as conn:
+        conn.execute("DELETE FROM photo_embeddings WHERE post_id = %s::uuid", (post_id,))
 
 
 def get_posts_without_embeddings() -> list[dict]:
-    """
-    Busca posts ativos que possuem fotos mas não têm embeddings.
-    Útil para migração em lote.
-    
-    Returns:
-        Lista de posts sem embeddings
-    """
-    client = get_client()
-    
-    # Busca posts ativos com fotos
-    all_posts = (
-        client.table("posts")
-        .select("id, photos")
-        .eq("status", "active")
-        .neq("photos", "{}")
-        .execute()
-    )
-    
-    if not all_posts.data:
-        return []
-    
-    # Busca post_ids que já têm embeddings
-    existing = (
-        client.table("photo_embeddings")
-        .select("post_id")
-        .execute()
-    )
-    
-    existing_ids = {row["post_id"] for row in (existing.data or [])}
-    
-    # Filtra os que não têm
-    return [p for p in all_posts.data if p["id"] not in existing_ids]
+    """Posts ativos com fotos e sem nenhum embedding (para /embeddings/batch)."""
+    with get_pool().connection() as conn:
+        return conn.execute(
+            """SELECT p.id::text AS id, p.photos
+               FROM posts p
+               WHERE p.status = 'active'
+                 AND cardinality(p.photos) > 0
+                 AND NOT EXISTS (SELECT 1 FROM photo_embeddings pe WHERE pe.post_id = p.id)"""
+        ).fetchall()
