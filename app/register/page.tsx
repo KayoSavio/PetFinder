@@ -13,7 +13,7 @@ export default function RegisterPage() {
         e.preventDefault();
         setLoading(true);
         setTimeout(() => {
-            alert('✅ Conta criada! (mock — conecte ao Supabase Auth)');
+            alert('✅ Conta criada! (mock — o login real com Neon Auth chega na próxima etapa)');
             setLoading(false);
         }, 1000);
     };

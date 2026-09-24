@@ -12,7 +12,7 @@ export default function LoginPage() {
         e.preventDefault();
         setLoading(true);
         setTimeout(() => {
-            alert('✅ Login simulado! Conecte ao Supabase Auth para autenticação real.');
+            alert('✅ Login simulado! O login real (Neon Auth) chega na próxima etapa.');
             setLoading(false);
         }, 1000);
     };
