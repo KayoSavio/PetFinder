@@ -1,22 +1,59 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { MOCK_POSTS, MOCK_SIGHTINGS } from '@/lib/mock-data';
+import type { Post, Sighting } from '@/types';
 import { getPostTypeLabel, getSpeciesEmoji, timeAgo, formatDate, generateWhatsAppLink } from '@/lib/utils';
 import MatchesPanel from '@/components/matches/MatchesPanel';
 
 export default function PostDetailPage() {
     const params = useParams();
     const postId = params.id as string;
-    const post = MOCK_POSTS.find(p => p.id === postId);
-    const sightings = MOCK_SIGHTINGS.filter(s => s.post_id === postId).sort(
-        (a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime()
-    );
-
+    const [post, setPost] = useState<Post | null>(null);
+    const [sightings, setSightings] = useState<Sighting[]>([]);
+    const [loading, setLoading] = useState(true);
     const [showSightingForm, setShowSightingForm] = useState(false);
     const [sightingNote, setSightingNote] = useState('');
+    const [sightingError, setSightingError] = useState<string | null>(null);
+
+    const loadSightings = useCallback(
+        () => fetch(`/api/posts/${postId}/sightings`)
+            .then(r => (r.ok ? r.json() : { sightings: [] }))
+            .then(s => setSightings(s.sightings)),
+        [postId],
+    );
+
+    useEffect(() => {
+        Promise.all([
+            fetch(`/api/posts/${postId}`).then(r => (r.ok ? r.json() : null)),
+            loadSightings(),
+        ])
+            .then(([p]) => setPost(p))
+            .finally(() => setLoading(false));
+    }, [postId, loadSightings]);
+
+    const submitSighting = async () => {
+        if (!post) return;
+        setSightingError(null);
+        // Por enquanto usa o local do post; a posição real do avistamento vem com a área provável
+        const res = await fetch(`/api/posts/${postId}/sightings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lat: post.pin_lat, lng: post.pin_lng, note: sightingNote }),
+        });
+        if (!res.ok) {
+            setSightingError((await res.json().catch(() => ({}))).error || 'Erro ao registrar avistamento');
+            return;
+        }
+        setShowSightingForm(false);
+        setSightingNote('');
+        loadSightings();
+    };
+
+    if (loading) {
+        return <div className="page-content"><div className="empty-state"><div className="empty-state-icon">⏳</div></div></div>;
+    }
 
     if (!post) {
         return (
@@ -45,6 +82,10 @@ export default function PostDetailPage() {
 
             {/* Gallery */}
             <div className="post-detail-gallery">
+                {post.photos[0] ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={post.photos[0]} alt={post.title} style={{ width: '100%', height: '300px', objectFit: 'cover', borderRadius: 'var(--radius-lg)' }} />
+                ) : (
                 <div style={{
                     width: '100%',
                     height: '300px',
@@ -58,6 +99,7 @@ export default function PostDetailPage() {
                 }}>
                     {getSpeciesEmoji(post.species)}
                 </div>
+                )}
             </div>
 
             {/* Header */}
@@ -74,7 +116,7 @@ export default function PostDetailPage() {
                         {post.title}
                     </h1>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-                        Publicado {timeAgo(post.created_at)} • {post.neighborhood}, {post.city}
+                        Publicado {timeAgo(post.created_at)}{[post.neighborhood, post.city].filter(Boolean).length > 0 && ` • ${[post.neighborhood, post.city].filter(Boolean).join(', ')}`}
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
@@ -199,16 +241,13 @@ export default function PostDetailPage() {
                             </div>
                             <button
                                 className="btn btn-primary"
-                                onClick={() => {
-                                    alert('✅ Avistamento registrado! (mock)');
-                                    setShowSightingForm(false);
-                                    setSightingNote('');
-                                }}
+                                onClick={submitSighting}
                                 disabled={!sightingNote.trim()}
                                 style={{ opacity: sightingNote.trim() ? 1 : 0.5 }}
                             >
                                 📍 Registrar Avistamento
                             </button>
+                            {sightingError && <p style={{ color: 'var(--color-lost)', fontSize: '0.875rem' }}>{sightingError}</p>}
                         </div>
                     </div>
                 )}

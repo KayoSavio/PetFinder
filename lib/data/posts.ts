@@ -37,7 +37,8 @@ function iso(v: unknown): string {
 function rowToPost(r: Row): Post {
     return {
         ...(r as unknown as Post),
-        event_datetime: iso(r.event_datetime),
+        // Sem data do evento → usa a de publicação (a UI sempre recebe uma data válida)
+        event_datetime: iso(r.event_datetime) || iso(r.created_at),
         created_at: iso(r.created_at),
         updated_at: iso(r.updated_at),
         base_lat: (r.base_lat as number | null) ?? undefined,

@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MOCK_POSTS } from '@/lib/mock-data';
 import type { Post, PostFilters } from '@/types';
 import { getPostTypeLabel, getSpeciesEmoji, timeAgo, generateWhatsAppLink } from '@/lib/utils';
 import dynamic from 'next/dynamic';
@@ -37,7 +36,13 @@ const MapComponent = dynamic<MapComponentProps>(
 );
 
 export default function MapPage() {
-    const [posts] = useState<Post[]>(MOCK_POSTS.filter(p => p.status === 'active'));
+    const [posts, setPosts] = useState<Post[]>([]);
+    useEffect(() => {
+        fetch('/api/posts?limit=500')
+            .then(res => (res.ok ? res.json() : Promise.reject()))
+            .then(data => setPosts(data.features.map((f: { properties: Post }) => f.properties)))
+            .catch(() => setPosts([]));
+    }, []);
     const [selectedPost, setSelectedPost] = useState<Post | null>(null);
     const [filters, setFilters] = useState<PostFilters>({});
     const [userLocation, setUserLocation] = useState<[number, number] | null>(null);

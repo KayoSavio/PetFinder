@@ -76,4 +76,10 @@ describe('posts', () => {
         expect(p.base_lat).toBeCloseTo(-23.54, 5);
         expect(p.search_radius_km).toBe(3);
     });
+
+    it('sem data do evento usa a data de publicação (evita "Invalid Date")', async () => {
+        const p = await createPost(input(), null);
+        expect(p.event_datetime).toBe(p.created_at);
+        expect(Number.isNaN(new Date(p.event_datetime).getTime())).toBe(false);
+    });
 });

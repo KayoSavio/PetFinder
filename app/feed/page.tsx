@@ -2,9 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { MOCK_POSTS } from '@/lib/mock-data';
 import type { Post, PostFilters } from '@/types';
-import { getPostTypeLabel, getPostTypeColor, getSpeciesEmoji, timeAgo, formatDistance, haversineDistance } from '@/lib/utils';
+import { getPostTypeLabel, getPostTypeColor, getSpeciesEmoji, timeAgo, formatDistance } from '@/lib/utils';
 
 export default function FeedPage() {
     const [posts, setPosts] = useState<Post[]>([]);
@@ -25,17 +24,11 @@ export default function FeedPage() {
             );
         }
 
-        // Load mock data with distances
-        const postsWithDistance = MOCK_POSTS
-            .filter(p => p.status === 'active')
-            .map(p => ({
-                ...p,
-                distance_km: haversineDistance(userLat, userLng, p.pin_lat, p.pin_lng),
-            }))
-            .sort((a, b) => (a.distance_km || 0) - (b.distance_km || 0));
-
-        setPosts(postsWithDistance);
-        setLoading(false);
+        fetch(`/api/posts?near=${userLat},${userLng}&radius=50&limit=100`)
+            .then(res => (res.ok ? res.json() : Promise.reject()))
+            .then(data => setPosts(data.features.map((f: { properties: Post }) => f.properties)))
+            .catch(() => setPosts([]))
+            .finally(() => setLoading(false));
     }, [userLat, userLng]);
 
     const filteredPosts = posts.filter(p => {

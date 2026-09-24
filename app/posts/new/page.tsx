@@ -2,12 +2,17 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import PhotoUploader from '@/components/posts/PhotoUploader';
 import type { PostType, PostUrgency } from '@/types';
 
 const STEPS = ['Tipo', 'Detalhes', 'Localização', 'Fotos', 'Contato', 'Revisar'];
 
 export default function NewPostPage() {
+    const router = useRouter();
     const [step, setStep] = useState(0);
+    const [submitting, setSubmitting] = useState(false);
+    const [submitError, setSubmitError] = useState<string | null>(null);
     const [formData, setFormData] = useState({
         type: '' as PostType | '',
         urgency: 'normal' as PostUrgency,
@@ -40,8 +45,26 @@ export default function NewPostPage() {
         }
     };
 
-    const handleSubmit = () => {
-        alert('✅ Post criado com sucesso! (mock — conecte ao Supabase para salvar de verdade)');
+    const handleSubmit = async () => {
+        setSubmitting(true);
+        setSubmitError(null);
+        try {
+            const res = await fetch('/api/posts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ...formData,
+                    base_lat: formData.type === 'help_request' ? formData.pin_lat : undefined,
+                    base_lng: formData.type === 'help_request' ? formData.pin_lng : undefined,
+                }),
+            });
+            const body = await res.json();
+            if (!res.ok) throw new Error(body.error || 'Erro ao criar post');
+            router.push(`/posts/${body.id}`);
+        } catch (e) {
+            setSubmitError(e instanceof Error ? e.message : 'Erro ao criar post');
+            setSubmitting(false);
+        }
     };
 
     const addColorTag = () => {
@@ -340,33 +363,13 @@ export default function NewPostPage() {
                     <div className="form-step">
                         <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Fotos</h2>
                         <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                            Adicione fotos do pet para facilitar a identificação.
+                            Adicione fotos do pet. Nós detectamos se é cachorro ou gato e usamos a foto para achar pets parecidos.
                         </p>
-                        <div className="image-upload-area">
-                            <div style={{ fontSize: '3rem', marginBottom: 'var(--space-sm)' }}>📷</div>
-                            <p style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>Clique ou arraste fotos aqui</p>
-                            <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>PNG, JPG até 10MB • As imagens são comprimidas automaticamente</p>
-                        </div>
-                        {formData.photos.length > 0 && (
-                            <div className="image-preview-grid">
-                                {formData.photos.map((photo, i) => (
-                                    <div key={i} className="image-preview">
-                                        <div style={{
-                                            width: '100%',
-                                            height: '100%',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            background: 'var(--gradient-brand-soft)',
-                                            fontSize: '2rem',
-                                        }}>🖼️</div>
-                                        <button className="remove-btn" onClick={() => {
-                                            setFormData({ ...formData, photos: formData.photos.filter((_, j) => j !== i) });
-                                        }}>✕</button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
+                        <PhotoUploader
+                            photos={formData.photos}
+                            onChange={photos => setFormData(f => ({ ...f, photos }))}
+                            onSpeciesDetected={species => setFormData(f => (f.species ? f : { ...f, species }))}
+                        />
                     </div>
                 )}
 
@@ -475,9 +478,12 @@ export default function NewPostPage() {
                         Próximo →
                     </button>
                 ) : (
-                    <button className="btn btn-primary btn-lg" onClick={handleSubmit} style={{ fontWeight: 800 }}>
-                        Publicar Alerta
-                    </button>
+                    <div style={{ textAlign: 'right' }}>
+                        <button className="btn btn-primary btn-lg" onClick={handleSubmit} disabled={submitting} style={{ fontWeight: 800, opacity: submitting ? 0.6 : 1 }}>
+                            {submitting ? 'Publicando...' : 'Publicar Alerta'}
+                        </button>
+                        {submitError && <p style={{ color: 'var(--color-lost)', marginTop: 'var(--space-sm)' }}>{submitError}</p>}
+                    </div>
                 )}
             </div>
         </div>
