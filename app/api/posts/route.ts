@@ -1,134 +1,67 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { MOCK_POSTS } from '@/lib/mock-data';
-import { haversineDistance } from '@/lib/utils';
+import { createPost, listPosts } from '@/lib/data/posts';
+import { validateNewPost } from '@/lib/data/validation';
+import { triggerEmbeddings } from '@/lib/ai';
+import type { PostStatus, PostType, PostUrgency } from '@/types';
 
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
-
-/**
- * Dispara geração de embeddings para as fotos de um post.
- * Fire-and-forget: não bloqueia a resposta ao usuário.
- */
-async function triggerEmbeddingGeneration(postId: string, photos: string[]) {
-    for (const photoUrl of photos) {
-        try {
-            const formData = new FormData();
-            formData.append('post_id', postId);
-            formData.append('photo_url', photoUrl);
-
-            fetch(`${AI_SERVICE_URL}/embeddings/generate-from-url`, {
-                method: 'POST',
-                body: formData,
-            }).catch((err) => {
-                console.warn(`[AI] Falha ao gerar embedding para ${photoUrl}:`, err.message);
-            });
-        } catch (err) {
-            console.warn(`[AI] Erro ao disparar embedding para ${photoUrl}:`, err);
-        }
-    }
+function dbError(err: unknown) {
+    console.error('[DB]', err);
+    return NextResponse.json({ error: 'Banco de dados indisponível. Tente de novo em instantes.' }, { status: 503 });
 }
 
 // GET /api/posts?bbox=sw_lat,sw_lng,ne_lat,ne_lng&type=lost&species=cachorro
 // GET /api/posts?near=lat,lng&radius=50&type=lost
 export async function GET(request: NextRequest) {
-    const { searchParams } = new URL(request.url);
+    const sp = new URL(request.url).searchParams;
+    const nums = (v: string | null) => (v ? v.split(',').map(Number) : null);
+    const bbox = nums(sp.get('bbox'));
+    const near = nums(sp.get('near'));
+    const page = Math.max(parseInt(sp.get('page') || '1'), 1);
+    const limit = parseInt(sp.get('limit') || '20');
 
-    const type = searchParams.get('type');
-    const species = searchParams.get('species');
-    const urgency = searchParams.get('urgency');
-    const status = searchParams.get('status') || 'active';
-
-    let posts = MOCK_POSTS.filter(p => {
-        if (status && p.status !== status) return false;
-        if (type && p.type !== type) return false;
-        if (species && p.species.toLowerCase() !== species.toLowerCase()) return false;
-        if (urgency && p.urgency !== urgency) return false;
-        return true;
-    });
-
-    // BBox query
-    const bbox = searchParams.get('bbox');
-    if (bbox) {
-        const [sw_lat, sw_lng, ne_lat, ne_lng] = bbox.split(',').map(Number);
-        posts = posts.filter(p =>
-            p.pin_lat >= sw_lat && p.pin_lat <= ne_lat &&
-            p.pin_lng >= sw_lng && p.pin_lng <= ne_lng
-        );
+    if ((bbox && (bbox.length !== 4 || bbox.some(Number.isNaN))) || (near && (near.length !== 2 || near.some(Number.isNaN)))) {
+        return NextResponse.json({ error: 'Parâmetros de localização inválidos' }, { status: 400 });
     }
 
-    // Near query
-    const near = searchParams.get('near');
-    const radius = parseFloat(searchParams.get('radius') || '50');
-    if (near) {
-        const [lat, lng] = near.split(',').map(Number);
-        posts = posts
-            .map(p => ({
-                ...p,
-                distance_km: haversineDistance(lat, lng, p.pin_lat, p.pin_lng),
-            }))
-            .filter(p => (p.distance_km || 0) <= radius)
-            .sort((a, b) => (a.distance_km || 0) - (b.distance_km || 0));
+    try {
+        const { posts, total } = await listPosts({
+            type: (sp.get('type') as PostType) || undefined,
+            species: sp.get('species') || undefined,
+            urgency: (sp.get('urgency') as PostUrgency) || undefined,
+            status: (sp.get('status') as PostStatus) || 'active',
+            bbox: bbox ? { sw_lat: bbox[0], sw_lng: bbox[1], ne_lat: bbox[2], ne_lng: bbox[3] } : undefined,
+            near: near ? { lat: near[0], lng: near[1], radius_km: parseFloat(sp.get('radius') || '50') } : undefined,
+            limit,
+            offset: (page - 1) * limit,
+        });
+        return NextResponse.json({
+            type: 'FeatureCollection',
+            features: posts.map(post => ({
+                type: 'Feature',
+                properties: post,
+                geometry: { type: 'Point', coordinates: [post.pin_lng, post.pin_lat] },
+            })),
+            total,
+            page,
+            limit,
+        });
+    } catch (err) {
+        return dbError(err);
     }
-
-    // Pagination
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const offset = (page - 1) * limit;
-    const paginated = posts.slice(offset, offset + limit);
-
-    // GeoJSON response
-    const geojson = {
-        type: 'FeatureCollection',
-        features: paginated.map(post => ({
-            type: 'Feature',
-            properties: post,
-            geometry: {
-                type: 'Point',
-                coordinates: [post.pin_lng, post.pin_lat],
-            },
-        })),
-        total: posts.length,
-        page,
-        limit,
-    };
-
-    return NextResponse.json(geojson);
 }
 
 // POST /api/posts
 export async function POST(request: NextRequest) {
+    const body = await request.json().catch(() => null);
+    const parsed = validateNewPost(body);
+    if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+
     try {
-        const body = await request.json();
-
-        // Validate required fields
-        const required = ['type', 'title', 'species', 'pin_lat', 'pin_lng'];
-        for (const field of required) {
-            if (!body[field]) {
-                return NextResponse.json(
-                    { error: `Campo obrigatório: ${field}` },
-                    { status: 400 }
-                );
-            }
-        }
-
-        // Mock: create post with ID
-        const newPost = {
-            id: crypto.randomUUID(),
-            user_id: 'mock-user',
-            status: 'active',
-            urgency: body.urgency || 'normal',
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            sighting_count: 0,
-            ...body,
-        };
-
-        // Dispara geração de embeddings da IA (fire-and-forget)
-        if (newPost.photos && newPost.photos.length > 0) {
-            triggerEmbeddingGeneration(newPost.id, newPost.photos);
-        }
-
-        return NextResponse.json(newPost, { status: 201 });
-    } catch {
-        return NextResponse.json({ error: 'Erro ao criar post' }, { status: 500 });
+        // Sem login ainda: user_id NULL (o plano do Neon Auth preenche)
+        const post = await createPost(parsed.value, null);
+        if (post.photos.length > 0) triggerEmbeddings(post.id, post.photos);
+        return NextResponse.json(post, { status: 201 });
+    } catch (err) {
+        return dbError(err);
     }
 }
