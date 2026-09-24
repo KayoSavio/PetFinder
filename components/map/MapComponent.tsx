@@ -5,6 +5,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Post } from '@/types';
 import { getSpeciesEmoji } from '@/lib/utils';
+import { BASE_TILES } from '@/lib/map/tiles';
 
 interface MapComponentProps {
     posts: Post[];
@@ -79,19 +80,14 @@ export default function MapComponent({ posts, userLocation, selectedPost, onSele
             attributionControl: false,
         });
 
-        // Dark theme tiles (CartoDB dark_matter — free, no token)
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            maxZoom: 19,
-            subdomains: 'abcd',
-        }).addTo(map);
+        // Camada base: OpenStreetMap (sem chave de API)
+        L.tileLayer(BASE_TILES.url, BASE_TILES.options).addTo(map);
 
         // Zoom control bottom-right
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
         // Attribution
-        L.control.attribution({ position: 'bottomleft', prefix: false })
-            .addAttribution('&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>')
-            .addTo(map);
+        L.control.attribution({ position: 'bottomleft', prefix: false }).addTo(map);
 
         // Create marker layer group
         markersRef.current = L.layerGroup().addTo(map);

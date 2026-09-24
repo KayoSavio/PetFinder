@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import L from 'leaflet';
+import { BASE_TILES } from '@/lib/map/tiles';
 import 'leaflet/dist/leaflet.css';
 import type { Post, MatchResult } from '@/types';
 
@@ -52,10 +53,8 @@ export default function MatchMap({ post, matches, selectedMatch, onSelectMatch }
             attributionControl: false,
         });
 
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            maxZoom: 19,
-            subdomains: 'abcd',
-        }).addTo(map);
+        L.tileLayer(BASE_TILES.url, BASE_TILES.options).addTo(map);
+        L.control.attribution({ position: 'bottomleft', prefix: false }).addTo(map);
 
         L.control.zoom({ position: 'bottomright' }).addTo(map);
         markersRef.current = L.layerGroup().addTo(map);
