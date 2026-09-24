@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { authClient } from '@/lib/auth/client';
 import { authErrorMessage, safeNext } from '@/lib/auth/messages';
 
+const GOOGLE_LOGIN = process.env.NEXT_PUBLIC_GOOGLE_LOGIN === '1';
+
 export default function RegisterPage() {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
@@ -19,8 +21,13 @@ export default function RegisterPage() {
 
     const signInWithGoogle = async () => {
         setError(null);
-        const { error } = await authClient.signIn.social({ provider: 'google', callbackURL: nextPath() });
-        if (error) setError(authErrorMessage(error));
+        try {
+            const { error } = await authClient.signIn.social({ provider: 'google', callbackURL: nextPath() });
+            if (error) setError(authErrorMessage(error));
+        } catch (err) {
+            console.warn('[auth]', err);
+            setError(authErrorMessage(err));
+        }
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -35,8 +42,10 @@ export default function RegisterPage() {
             }
             router.push(nextPath());
             router.refresh();
-        } catch {
-            setError('Sem conexão com o servidor. Tente de novo.');
+        } catch (err) {
+            // O cliente do Neon Auth lança AuthApiError em respostas 4xx; mostra o motivo real
+            console.warn('[auth]', err);
+            setError(authErrorMessage(err));
         } finally {
             setLoading(false);
         }
@@ -62,7 +71,9 @@ export default function RegisterPage() {
                     </p>
                 </div>
 
-                {/* Google OAuth */}
+                {/* Google: só com credenciais OAuth próprias no Neon (as compartilhadas dão redirect_uri_mismatch em sa-east-1) */}
+                {GOOGLE_LOGIN && (
+                <>
                 <button type="button" onClick={signInWithGoogle} className="btn btn-secondary" style={{ width: '100%', padding: '0.75rem', background: 'white', border: '1px solid var(--border-medium)', color: 'var(--text-primary)', fontWeight: 600 }}>
                     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.797 2.716v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4" />
@@ -78,6 +89,9 @@ export default function RegisterPage() {
                     <span style={{ margin: '0 var(--space-md)', fontSize: '0.8125rem', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em' }}>ou crie com email</span>
                     <div style={{ flex: 1, height: '1px', background: 'var(--border-subtle)' }} />
                 </div>
+
+                </>
+                )}
 
                 <form onSubmit={handleSubmit}>
                     <div className="input-group" style={{ marginBottom: 'var(--space-md)' }}>
