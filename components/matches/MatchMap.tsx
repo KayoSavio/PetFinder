@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import L from 'leaflet';
-import { BASE_TILES } from '@/lib/map/tiles';
+import { BASE_TILES, LABEL_TILES } from '@/lib/map/tiles';
 import 'leaflet/dist/leaflet.css';
 import type { Post, MatchResult } from '@/types';
 
@@ -54,6 +54,7 @@ export default function MatchMap({ post, matches, selectedMatch, onSelectMatch }
         });
 
         L.tileLayer(BASE_TILES.url, BASE_TILES.options).addTo(map);
+        L.tileLayer(LABEL_TILES.url, LABEL_TILES.options).addTo(map);
         L.control.attribution({ position: 'bottomleft', prefix: false }).addTo(map);
 
         L.control.zoom({ position: 'bottomright' }).addTo(map);

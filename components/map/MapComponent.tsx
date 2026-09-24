@@ -5,7 +5,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Post } from '@/types';
 import { getSpeciesEmoji } from '@/lib/utils';
-import { BASE_TILES } from '@/lib/map/tiles';
+import { BASE_TILES, LABEL_TILES } from '@/lib/map/tiles';
 
 interface MapComponentProps {
     posts: Post[];
@@ -80,8 +80,9 @@ export default function MapComponent({ posts, userLocation, selectedPost, onSele
             attributionControl: false,
         });
 
-        // Camada base: OpenStreetMap (sem chave de API)
+        // Mapa base limpo (sem pontos de interesse) para os pins dos pets se destacarem
         L.tileLayer(BASE_TILES.url, BASE_TILES.options).addTo(map);
+        L.tileLayer(LABEL_TILES.url, LABEL_TILES.options).addTo(map);
 
         // Zoom control bottom-right
         L.control.zoom({ position: 'bottomright' }).addTo(map);
