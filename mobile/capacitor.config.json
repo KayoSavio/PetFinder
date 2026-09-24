@@ -1,0 +1,10 @@
+{
+  "appId": "com.spykke.app",
+  "appName": "spykke",
+  "webDir": "www",
+  "server": {
+    "url": "https://hoveringly-subincomplete-leonida.ngrok-free.dev",
+    "cleartext": false
+  },
+  "overrideUserAgent": "spykke-android/0.1"
+}

@@ -1,0 +1,17 @@
+{
+  "name": "spykke-mobile",
+  "private": true,
+  "version": "0.1.0",
+  "description": "APK de teste: casca Android (Capacitor) que abre o app pelo túnel HTTPS",
+  "scripts": {
+    "sync": "cap sync android",
+    "apk": "cap sync android && cd android && gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.2"
+  }
+}
