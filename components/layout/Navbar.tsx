@@ -1,10 +1,20 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { authClient } from '@/lib/auth/client';
 
 export function Navbar() {
     const pathname = usePathname();
+    const router = useRouter();
+    const { data: session, isPending } = authClient.useSession();
+    const user = session?.user;
+
+    const signOut = async () => {
+        await authClient.signOut();
+        router.push('/feed');
+        router.refresh();
+    };
 
     const links = [
         { href: '/map', label: 'Mapa', icon: '🗺️' },
@@ -49,10 +59,19 @@ export function Navbar() {
                     ))}
                 </div>
 
-                <div className="navbar-actions">
-                    <Link href="/login" className="btn btn-primary btn-sm">
-                        Entrar
-                    </Link>
+                <div className="navbar-actions" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+                    {isPending ? null : user ? (
+                        <>
+                            <Link href="/profile" style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.875rem' }}>
+                                {user.name || user.email}
+                            </Link>
+                            <button onClick={signOut} className="btn btn-ghost btn-sm">Sair</button>
+                        </>
+                    ) : (
+                        <Link href="/login" className="btn btn-primary btn-sm">
+                            Entrar
+                        </Link>
+                    )}
                 </div>
             </div>
         </nav>

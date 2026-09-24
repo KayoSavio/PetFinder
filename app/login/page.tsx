@@ -2,19 +2,52 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { authClient } from '@/lib/auth/client';
+import { authErrorMessage, safeNext } from '@/lib/auth/messages';
+
+const GOOGLE_LOGIN = process.env.NEXT_PUBLIC_GOOGLE_LOGIN === '1';
 
 export default function LoginPage() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const router = useRouter();
 
-    const handleSubmit = (e: React.FormEvent) => {
+    // Para onde voltar depois de entrar (?next=/posts/new); só caminhos do próprio app
+    const nextPath = () => safeNext(new URLSearchParams(window.location.search).get('next'));
+
+    const signInWithGoogle = async () => {
+        setError(null);
+        try {
+            const { error } = await authClient.signIn.social({ provider: 'google', callbackURL: nextPath() });
+            if (error) setError(authErrorMessage(error));
+        } catch (err) {
+            console.warn('[auth]', err);
+            setError(authErrorMessage(err));
+        }
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
-        setTimeout(() => {
-            alert('✅ Login simulado! O login real (Neon Auth) chega na próxima etapa.');
+        setError(null);
+        try {
+            const { error } = await authClient.signIn.email({ email, password });
+            if (error) {
+                setError(authErrorMessage(error));
+                return;
+            }
+            router.push(nextPath());
+            router.refresh();
+        } catch (err) {
+            // O cliente do Neon Auth lança AuthApiError em respostas 4xx; mostra o motivo real
+            console.warn('[auth]', err);
+            setError(authErrorMessage(err));
+        } finally {
             setLoading(false);
-        }, 1000);
+        }
     };
 
     return (
@@ -37,8 +70,10 @@ export default function LoginPage() {
                     </p>
                 </div>
 
-                {/* Google OAuth */}
-                <button className="btn btn-secondary" style={{ width: '100%', padding: '0.75rem', background: 'white', border: '1px solid var(--border-medium)', color: 'var(--text-primary)', fontWeight: 600 }}>
+                {/* Google: só com credenciais OAuth próprias no Neon (as compartilhadas dão redirect_uri_mismatch em sa-east-1) */}
+                {GOOGLE_LOGIN && (
+                <>
+                <button type="button" onClick={signInWithGoogle} className="btn btn-secondary" style={{ width: '100%', padding: '0.75rem', background: 'white', border: '1px solid var(--border-medium)', color: 'var(--text-primary)', fontWeight: 600 }}>
                     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.797 2.716v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4" />
                         <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.909-2.259c-.806.54-1.837.86-3.047.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853" />
@@ -53,6 +88,9 @@ export default function LoginPage() {
                     <span style={{ margin: '0 var(--space-md)', fontSize: '0.8125rem', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em' }}>ou use email</span>
                     <div style={{ flex: 1, height: '1px', background: 'var(--border-subtle)' }} />
                 </div>
+
+                </>
+                )}
 
                 <form onSubmit={handleSubmit}>
                     <div className="input-group" style={{ marginBottom: 'var(--space-md)' }}>
@@ -69,7 +107,6 @@ export default function LoginPage() {
                     <div className="input-group" style={{ marginBottom: 'var(--space-xl)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                             <label className="input-label">Senha</label>
-                            <a href="#" style={{ fontSize: '0.8125rem', color: 'var(--color-primary)', fontWeight: 500 }}>Esqueceu a senha?</a>
                         </div>
                         <input
                             type="password"
@@ -88,6 +125,11 @@ export default function LoginPage() {
                     >
                         {loading ? <span className="spinner" /> : 'Entrar na Conta'}
                     </button>
+                    {error && (
+                        <p role="alert" style={{ color: 'var(--color-lost)', fontSize: '0.875rem', marginTop: 'var(--space-md)', textAlign: 'center' }}>
+                            {error}
+                        </p>
+                    )}
                 </form>
 
                 <p style={{ textAlign: 'center', marginTop: 'var(--space-xl)', fontSize: '0.9375rem', color: 'var(--text-secondary)' }}>

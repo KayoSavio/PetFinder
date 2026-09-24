@@ -1,9 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { authClient } from '@/lib/auth/client';
 
 export default function ProfilePage() {
+    const router = useRouter();
+    const { data: session } = authClient.useSession();
+    const user = session?.user;
+
+    const signOut = async () => {
+        await authClient.signOut();
+        router.push('/feed');
+        router.refresh();
+    };
     const [alerts, setAlerts] = useState([
         {
             id: '1',
@@ -50,10 +60,10 @@ export default function ProfilePage() {
                     </svg>
                 </div>
                 <h1 style={{ fontSize: '1.75rem', fontWeight: 800, marginBottom: 'var(--space-xs)' }}>
-                    João Silva
+                    {user?.name || 'Sua conta'}
                 </h1>
                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.9375rem', marginBottom: 'var(--space-xl)' }}>
-                    joao.silva@email.com
+                    {user?.email}
                 </p>
                 <div style={{
                     display: 'flex',
@@ -131,7 +141,7 @@ export default function ProfilePage() {
                         <span style={{ color: 'var(--text-muted)' }}>→</span>
                     </button>
                     <div style={{ height: '1px', background: 'var(--border-subtle)', margin: 'var(--space-md) 0' }} />
-                    <button className="btn btn-ghost" style={{ justifyContent: 'flex-start', color: 'var(--color-lost)', padding: '1rem', width: '100%', fontWeight: 600 }}>
+                    <button onClick={signOut} className="btn btn-ghost" style={{ justifyContent: 'flex-start', color: 'var(--color-lost)', padding: '1rem', width: '100%', fontWeight: 600 }}>
                         Sair da Conta
                     </button>
                 </div>

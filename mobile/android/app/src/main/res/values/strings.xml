@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">spykke</string>
+    <string name="title_activity_main">spykke</string>
+    <string name="package_name">com.spykke.app</string>
+    <string name="custom_url_scheme">com.spykke.app</string>
+</resources>
