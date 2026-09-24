@@ -52,3 +52,4 @@ ai-service/test_results*.txt
 
 # superpowers (workspace local de planos)
 .superpowers/
+.neon

@@ -5,6 +5,13 @@ import nextEnv from '@next/env';
 import { MOCK_POSTS, MOCK_SIGHTINGS } from '../lib/mock-data.ts';
 
 nextEnv.loadEnvConfig(process.cwd());
+
+// O seed apaga os posts: nunca no branch de produção (DATABASE_URL vem do `neon link`)
+if (process.env.NEON_BRANCH === 'production' && !process.argv.includes('--force')) {
+    console.error('❌ DATABASE_URL aponta para o branch production. O seed apaga todos os posts — recusado.');
+    console.error('   Use um branch de desenvolvimento (neon link --branch <nome>) ou passe --force se tiver certeza.');
+    process.exit(1);
+}
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
 

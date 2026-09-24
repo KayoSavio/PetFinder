@@ -13,6 +13,8 @@
     "db:seed": "tsx scripts/seed.mjs"
   },
   "dependencies": {
+    "@neon/config": "^1.7.3",
+    "@neon/env": "^1.4.4",
     "@neondatabase/serverless": "^1.1.0",
     "@types/leaflet": "^1.9.21",
     "@vercel/blob": "^2.8.0",
