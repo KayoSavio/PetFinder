@@ -1,8 +1,8 @@
 """
 spykke AI Service — Servidor FastAPI para comparação visual de pets.
 
-Pipeline v2: YOLOv8n recorta o animal → DINOv2 gera o embedding.
-(CLIP foi substituído — não distinguia bem indivíduos da mesma raça.)
+Pipeline v3: YOLOv8n recorta o animal → CLIP diz se é cachorro ou gato → DINOv2 gera o embedding.
+(CLIP não gera o embedding — não distingue bem indivíduos da mesma raça; só classifica a espécie.)
 
 Endpoints:
   POST /embeddings/generate          — Gera embedding de uma foto (upload) e salva
@@ -12,12 +12,16 @@ Endpoints:
   GET  /health                       — Healthcheck
 """
 
+import json
+from io import BytesIO
+
 import httpx
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
+from PIL import Image, UnidentifiedImageError
 
 from config import (
     HOST,
@@ -27,7 +31,7 @@ from config import (
     DEFAULT_MATCH_RADIUS_KM,
     DINO_MODEL_NAME,
 )
-from pipeline import process_image
+from pipeline import analyze_image, process_image
 from database import (
     save_embedding,
     find_similar_photos,
@@ -87,6 +91,23 @@ class EmbeddingResponse(BaseModel):
     cropped: bool = False
 
 
+class AnalyzeResponse(BaseModel):
+    has_animal: bool
+    species: Optional[str] = None
+    confidence: Optional[float] = None
+
+
+async def _download(photo_url: str) -> bytes:
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(photo_url)
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Não foi possível baixar a imagem: HTTP {response.status_code}",
+        )
+    return response.content
+
+
 # =====================
 # Endpoints
 # =====================
@@ -97,16 +118,34 @@ async def health():
     from dino_model import dino_embedder
     return {
         "status": "ok",
-        "pipeline": "yolov8n-crop + dinov2",
+        "pipeline": "yolov8n-crop + clip-species + dinov2",
         "model": DINO_MODEL_NAME,
         "device": dino_embedder.device,
     }
 
 
+@app.post("/analyze", response_model=AnalyzeResponse)
+async def analyze_photo(
+    file: Optional[UploadFile] = File(None),
+    photo_url: Optional[str] = Form(None),
+):
+    """Só detecta: tem cachorro/gato na foto? Usado no formulário antes de salvar."""
+    if file is None and not photo_url:
+        raise HTTPException(status_code=400, detail="Envie 'file' ou 'photo_url'")
+    image_bytes = await file.read() if file is not None else await _download(photo_url)
+    try:
+        image = Image.open(BytesIO(image_bytes))
+        image.load()
+    except (UnidentifiedImageError, OSError):
+        raise HTTPException(status_code=400, detail="Arquivo não é uma imagem válida")
+    a = analyze_image(image)
+    return AnalyzeResponse(has_animal=a["has_animal"], species=a["species"], confidence=a["confidence"])
+
+
 def _process_and_save(image_bytes: bytes, post_id: str, photo_url: str) -> EmbeddingResponse:
     """Recorta o animal, gera o embedding e salva no banco."""
     result = process_image(image_bytes)
-    saved = save_embedding(post_id, photo_url, result["embedding"])
+    saved = save_embedding(post_id, photo_url, result["embedding"], result["species"])
     return EmbeddingResponse(
         post_id=post_id,
         photo_url=photo_url,
@@ -123,7 +162,7 @@ async def generate_embedding(
     post_id: str = Form(...),
     photo_url: str = Form(...),
 ):
-    """Gera embedding de uma foto (upload direto) e salva no Supabase."""
+    """Gera embedding de uma foto (upload direto) e salva no banco."""
     try:
         image_bytes = await file.read()
         return _process_and_save(image_bytes, post_id, photo_url)
@@ -136,16 +175,9 @@ async def generate_embedding_from_url(
     post_id: str = Form(...),
     photo_url: str = Form(...),
 ):
-    """Gera embedding a partir de uma URL de foto (Supabase Storage)."""
+    """Gera embedding a partir de uma URL de foto (Vercel Blob)."""
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(photo_url)
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Não foi possível baixar a imagem: HTTP {response.status_code}",
-                )
-            image_bytes = response.content
+        image_bytes = await _download(photo_url)
         return _process_and_save(image_bytes, post_id, photo_url)
     except HTTPException:
         raise
@@ -189,6 +221,7 @@ async def match_photo(
             lng=lng,
             radius_km=radius_km if (lat is not None and lng is not None) else None,
             search_types=types,
+            query_species=result["species"],
         )
 
         if not matches:
@@ -254,9 +287,8 @@ async def match_by_post(
         best: dict[str, dict] = {}
         for emb_row in embeddings:
             emb = emb_row["embedding"]
-            # O Supabase pode retornar o vetor como string "[0.1,0.2,...]"
+            # O banco devolve o vetor como string "[0.1,0.2,...]"
             if isinstance(emb, str):
-                import json
                 emb = json.loads(emb)
 
             matches = find_similar_photos(
@@ -268,6 +300,7 @@ async def match_by_post(
                 radius_km=radius_km if (lat is not None and lng is not None) else None,
                 search_types=types,
                 exclude_post_id=post_id,
+                query_species=emb_row.get("species"),
             )
             for m in matches:
                 key = m["photo_url"]
@@ -321,7 +354,7 @@ async def batch_generate_embeddings():
                             errors.append(f"Erro ao baixar {photo_url}: HTTP {response.status_code}")
                             continue
                         result = process_image(response.content)
-                        save_embedding(post_id, photo_url, result["embedding"])
+                        save_embedding(post_id, photo_url, result["embedding"], result["species"])
                         processed += 1
                     except Exception as e:
                         errors.append(f"Erro ao processar {photo_url}: {str(e)}")

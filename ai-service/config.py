@@ -10,8 +10,9 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 DINO_MODEL_NAME = "facebook/dinov2-small"
 EMBEDDING_DIM = 384
 
-# Modelo antigo (mantido apenas para testes comparativos)
+# CLIP: classificador de espécie (cachorro × gato) sobre o recorte do YOLO
 CLIP_MODEL_NAME = "openai/clip-vit-base-patch32"
+SPECIES_MIN_PROB = 0.85             # abaixo disso a espécie fica desconhecida (não filtra)
 
 # Detector de animais (recorte antes do embedding)
 YOLO_MODEL_NAME = "yolov8n.pt"      # nano: 6MB, rápido em CPU

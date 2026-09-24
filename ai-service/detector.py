@@ -7,7 +7,7 @@ visual. Recortando só o animal, o embedding representa o PET, não a cena.
 """
 
 from io import BytesIO
-from typing import Optional, Union
+from typing import NamedTuple, Optional, Union
 
 from PIL import Image
 from ultralytics import YOLO
@@ -18,6 +18,18 @@ from config import YOLO_MODEL_NAME, YOLO_CONF_THRESHOLD, CROP_PADDING
 COCO_CAT = 15
 COCO_DOG = 16
 ANIMAL_CLASSES = {COCO_CAT, COCO_DOG}
+
+
+class Detection(NamedTuple):
+    species: str                                   # 'dog' | 'cat'
+    confidence: float                              # 0–1 (YOLO)
+    box: tuple[float, float, float, float]         # x1, y1, x2, y2
+
+
+def _to_rgb(image: Union[Image.Image, bytes]) -> Image.Image:
+    if isinstance(image, bytes):
+        image = Image.open(BytesIO(image))
+    return image if image.mode == "RGB" else image.convert("RGB")
 
 
 class AnimalDetector:
@@ -39,32 +51,13 @@ class AnimalDetector:
         self._initialized = True
         print("✅ Detector YOLO carregado!")
 
-    def detect_and_crop(
-        self, image: Union[Image.Image, bytes]
-    ) -> tuple[Image.Image, Optional[str]]:
-        """
-        Detecta o animal na imagem e retorna o recorte.
+    def detect(self, image: Union[Image.Image, bytes]) -> Optional[Detection]:
+        """Acha o animal principal (cachorro/gato) na imagem, ou None."""
+        image = _to_rgb(image)
+        results = self.model.predict(image, conf=YOLO_CONF_THRESHOLD, verbose=False)
 
-        Args:
-            image: PIL Image ou bytes da imagem
-
-        Returns:
-            (imagem recortada, espécie detectada 'dog'/'cat'/None)
-            Se nenhum animal for detectado, retorna a imagem original.
-        """
-        if isinstance(image, bytes):
-            image = Image.open(BytesIO(image))
-        if image.mode != "RGB":
-            image = image.convert("RGB")
-
-        results = self.model.predict(
-            image, conf=YOLO_CONF_THRESHOLD, verbose=False
-        )
-
-        best_box = None
+        best: Optional[Detection] = None
         best_score = 0.0
-        best_cls = None
-
         for result in results:
             for box in result.boxes:
                 cls = int(box.cls[0])
@@ -77,24 +70,30 @@ class AnimalDetector:
                 score = conf * (area / (image.width * image.height))
                 if score > best_score:
                     best_score = score
-                    best_box = (x1, y1, x2, y2)
-                    best_cls = "cat" if cls == COCO_CAT else "dog"
+                    best = Detection("cat" if cls == COCO_CAT else "dog", conf, (x1, y1, x2, y2))
+        return best
 
-        if best_box is None:
-            # Nenhum animal detectado — usa a imagem inteira (fallback seguro)
+    def detect_and_crop(
+        self, image: Union[Image.Image, bytes]
+    ) -> tuple[Image.Image, Optional[Detection]]:
+        """
+        Detecta o animal e retorna (recorte, detecção).
+        Sem animal: (imagem original, None) — fallback seguro.
+        """
+        image = _to_rgb(image)
+        det = self.detect(image)
+        if det is None:
             return image, None
 
         # Adiciona padding ao redor do box (contexto ajuda um pouco)
-        x1, y1, x2, y2 = best_box
+        x1, y1, x2, y2 = det.box
         pad_x = (x2 - x1) * CROP_PADDING
         pad_y = (y2 - y1) * CROP_PADDING
         x1 = max(0, x1 - pad_x)
         y1 = max(0, y1 - pad_y)
         x2 = min(image.width, x2 + pad_x)
         y2 = min(image.height, y2 + pad_y)
-
-        cropped = image.crop((int(x1), int(y1), int(x2), int(y2)))
-        return cropped, best_cls
+        return image.crop((int(x1), int(y1), int(x2), int(y2))), det
 
 
 # Instância global (lazy — só carrega quando importado)
