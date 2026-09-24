@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
 import { createPost, listPosts } from '@/lib/data/posts';
 import { validateNewPost } from '@/lib/data/validation';
 import { triggerEmbeddings } from '@/lib/ai';
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
     try {
         // Sem login ainda: user_id NULL (o plano do Neon Auth preenche)
         const post = await createPost(parsed.value, null);
-        if (post.photos.length > 0) triggerEmbeddings(post.id, post.photos);
+        if (post.photos.length > 0) after(() => triggerEmbeddings(post.id, post.photos));
         return NextResponse.json(post, { status: 201 });
     } catch (err) {
         return dbError(err);

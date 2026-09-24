@@ -109,12 +109,17 @@ def delete_embeddings(post_id: str) -> None:
 
 
 def get_posts_without_embeddings() -> list[dict]:
-    """Posts ativos com fotos e sem nenhum embedding (para /embeddings/batch)."""
+    """Posts ativos com fotos ainda sem embedding; 'photos' traz só as que faltam."""
     with get_pool().connection() as conn:
         return conn.execute(
-            """SELECT p.id::text AS id, p.photos
+            """SELECT p.id::text AS id,
+                      array_agg(photo ORDER BY ord) AS photos
                FROM posts p
+               CROSS JOIN LATERAL unnest(p.photos) WITH ORDINALITY AS u(photo, ord)
                WHERE p.status = 'active'
-                 AND cardinality(p.photos) > 0
-                 AND NOT EXISTS (SELECT 1 FROM photo_embeddings pe WHERE pe.post_id = p.id)"""
+                 AND NOT EXISTS (
+                   SELECT 1 FROM photo_embeddings pe
+                   WHERE pe.post_id = p.id AND pe.photo_url = u.photo
+                 )
+               GROUP BY p.id"""
         ).fetchall()

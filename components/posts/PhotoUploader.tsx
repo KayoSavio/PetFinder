@@ -1,55 +1,47 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, type Dispatch } from 'react';
 import { uploadImage } from '@/lib/upload';
-
-type Analysis =
-    | { state: 'uploading' }
-    | { state: 'analyzing' }
-    | { state: 'done'; species: 'dog' | 'cat' | null }
-    | { state: 'unavailable' }
-    | { state: 'error'; message: string };
+import {
+    ACCEPTED_TYPES,
+    MAX_PHOTOS,
+    isAcceptedImage,
+    labelFor,
+    roomLeft,
+    type PhotosAction,
+    type PhotosState,
+    type Species,
+} from '@/lib/photos/state';
 
 interface PhotoUploaderProps {
-    photos: string[];
-    onChange: (urls: string[]) => void;
+    state: PhotosState;
+    dispatch: Dispatch<PhotosAction>;
     onSpeciesDetected: (species: 'Cachorro' | 'Gato') => void;
 }
 
-const MAX_PHOTOS = 5;
-const SPECIES_LABEL = { dog: '🐶 Cachorro detectado', cat: '🐱 Gato detectado' } as const;
-
-export default function PhotoUploader({ photos, onChange, onSpeciesDetected }: PhotoUploaderProps) {
+export default function PhotoUploader({ state, dispatch, onSpeciesDetected }: PhotoUploaderProps) {
     const inputRef = useRef<HTMLInputElement>(null);
-    const [pending, setPending] = useState<{ id: string; preview: string; analysis: Analysis }[]>([]);
-    const [analysisByUrl, setAnalysisByUrl] = useState<Record<string, Analysis>>({});
 
-    async function handleFiles(files: FileList | null) {
+    function handleFiles(files: FileList | null) {
         if (!files) return;
-        const room = MAX_PHOTOS - photos.length - pending.length;
-        const selected = Array.from(files).filter(f => f.type.startsWith('image/')).slice(0, Math.max(room, 0));
-        let urls = [...photos];
-
+        const selected = Array.from(files).filter(f => isAcceptedImage(f.type)).slice(0, Math.max(roomLeft(state), 0));
+        // Cada arquivo entra no estado antes de subir: o limite e o "ocupado" já contam com ele
         for (const file of selected) {
             const id = crypto.randomUUID();
-            const preview = URL.createObjectURL(file);
-            setPending(p => [...p, { id, preview, analysis: { state: 'uploading' } }]);
-            try {
-                const url = await uploadImage(file);
-                urls = [...urls, url];
-                onChange(urls);
-                setAnalysisByUrl(a => ({ ...a, [url]: { state: 'analyzing' } }));
-                analyze(url);
-            } catch {
-                setAnalysisByUrl(a => ({ ...a, [preview]: { state: 'error', message: 'Falha no envio' } }));
-            } finally {
-                setPending(p => p.filter(x => x.id !== id));
-                URL.revokeObjectURL(preview);
-            }
+            dispatch({ type: 'add', id, preview: URL.createObjectURL(file) });
+            upload(id, file);
         }
     }
 
-    async function analyze(url: string) {
+    async function upload(id: string, file: File) {
+        let url: string;
+        try {
+            url = await uploadImage(file);
+        } catch {
+            dispatch({ type: 'failed', id, message: 'Falha no envio' });
+            return;
+        }
+        dispatch({ type: 'uploaded', id, url });
         try {
             const res = await fetch('/api/photos/analyze', {
                 method: 'POST',
@@ -57,20 +49,17 @@ export default function PhotoUploader({ photos, onChange, onSpeciesDetected }: P
                 body: JSON.stringify({ photo_url: url }),
             });
             if (!res.ok) throw new Error();
-            const data: { has_animal: boolean; species: 'dog' | 'cat' | null } = await res.json();
-            setAnalysisByUrl(a => ({ ...a, [url]: { state: 'done', species: data.has_animal ? data.species : null } }));
+            const data: { has_animal: boolean; species: Species | null } = await res.json();
+            dispatch({ type: 'analyzed', id, hasAnimal: data.has_animal, species: data.species });
             if (data.species) onSpeciesDetected(data.species === 'dog' ? 'Cachorro' : 'Gato');
         } catch {
-            setAnalysisByUrl(a => ({ ...a, [url]: { state: 'unavailable' } }));
+            dispatch({ type: 'unavailable', id });
         }
     }
 
-    function label(a: Analysis | undefined): string {
-        if (!a || a.state === 'analyzing') return '🔎 Analisando...';
-        if (a.state === 'uploading') return '⬆️ Enviando...';
-        if (a.state === 'unavailable') return 'Análise indisponível agora';
-        if (a.state === 'error') return a.message;
-        return a.species ? SPECIES_LABEL[a.species] : '⚠️ Não encontramos um cachorro ou gato nesta foto';
+    function remove(id: string, preview: string) {
+        dispatch({ type: 'remove', id });
+        URL.revokeObjectURL(preview);
     }
 
     return (
@@ -92,28 +81,23 @@ export default function PhotoUploader({ photos, onChange, onSpeciesDetected }: P
                 <input
                     ref={inputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/webp"
+                    accept={ACCEPTED_TYPES.join(',')}
                     multiple
                     hidden
                     onChange={e => { handleFiles(e.target.files); e.target.value = ''; }}
                 />
             </div>
 
-            {(photos.length > 0 || pending.length > 0) && (
+            {state.items.length > 0 && (
                 <div className="image-preview-grid">
-                    {photos.map(url => (
-                        <div key={url} className="image-preview">
+                    {state.items.map(item => (
+                        <div key={item.id} className="image-preview" style={item.status === 'uploading' ? { opacity: 0.6 } : undefined}>
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={url} alt="Foto do pet" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                            <span className="image-preview-label">{label(analysisByUrl[url])}</span>
-                            <button className="remove-btn" onClick={() => onChange(photos.filter(p => p !== url))}>✕</button>
-                        </div>
-                    ))}
-                    {pending.map(p => (
-                        <div key={p.id} className="image-preview" style={{ opacity: 0.6 }}>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={p.preview} alt="Enviando" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                            <span className="image-preview-label">{label(p.analysis)}</span>
+                            <img src={item.url ?? item.preview} alt="Foto do pet" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <span className="image-preview-label">{labelFor(item)}</span>
+                            {item.status !== 'uploading' && (
+                                <button className="remove-btn" onClick={() => remove(item.id, item.preview)}>✕</button>
+                            )}
                         </div>
                     ))}
                 </div>

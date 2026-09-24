@@ -1,4 +1,5 @@
 import type { PostType, PostUrgency } from '@/types';
+import { isAllowedPhotoUrl } from '@/lib/photo-url';
 
 export interface NewPostInput {
     type: PostType;
@@ -31,6 +32,7 @@ export interface NewSightingInput {
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
+const MAX_PHOTOS = 5;
 const POST_TYPES: PostType[] = ['lost', 'found', 'help_request'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -55,6 +57,10 @@ function str(v: unknown): string {
     return typeof v === 'string' ? v.trim() : '';
 }
 
+function validDate(v: string): boolean {
+    return !Number.isNaN(Date.parse(v));
+}
+
 export function validateNewPost(body: unknown): Result<NewPostInput> {
     const b = (body ?? {}) as Record<string, unknown>;
     for (const field of ['type', 'title', 'species', 'pin_lat', 'pin_lng']) {
@@ -67,9 +73,12 @@ export function validateNewPost(body: unknown): Result<NewPostInput> {
     if (!validLatLng(lat, lng)) return { ok: false, error: 'Localização inválida' };
 
     const photos = Array.isArray(b.photos) ? b.photos : [];
-    if (!photos.every(p => typeof p === 'string' && p.startsWith('https://'))) {
+    if (photos.length > MAX_PHOTOS) return { ok: false, error: `Máximo de ${MAX_PHOTOS} fotos` };
+    if (!photos.every(p => typeof p === 'string' && isAllowedPhotoUrl(p))) {
         return { ok: false, error: 'Foto inválida' };
     }
+    const eventDatetime = str(b.event_datetime);
+    if (eventDatetime && !validDate(eventDatetime)) return { ok: false, error: 'Data inválida' };
 
     const baseLat = toNum(b.base_lat);
     const baseLng = toNum(b.base_lng);
@@ -85,7 +94,7 @@ export function validateNewPost(body: unknown): Result<NewPostInput> {
             species: str(b.species),
             size: str(b.size),
             color_tags: Array.isArray(b.color_tags) ? b.color_tags.filter((t): t is string => typeof t === 'string') : [],
-            event_datetime: str(b.event_datetime) || null,
+            event_datetime: eventDatetime || null,
             pin_lat: lat!,
             pin_lng: lng!,
             base_lat: hasBase ? baseLat : null,
@@ -109,9 +118,11 @@ export function validateNewSighting(body: unknown): Result<NewSightingInput> {
     const lng = toNum(b.lng);
     if (!validLatLng(lat, lng)) return { ok: false, error: 'Localização inválida' };
     const photo = str(b.photo_url);
-    if (photo && !photo.startsWith('https://')) return { ok: false, error: 'Foto inválida' };
+    if (photo && !isAllowedPhotoUrl(photo)) return { ok: false, error: 'Foto inválida' };
+    const datetime = str(b.datetime);
+    if (datetime && !validDate(datetime)) return { ok: false, error: 'Data inválida' };
     return {
         ok: true,
-        value: { lat: lat!, lng: lng!, datetime: str(b.datetime) || new Date().toISOString(), note: str(b.note), photo_url: photo || null },
+        value: { lat: lat!, lng: lng!, datetime: datetime || new Date().toISOString(), note: str(b.note), photo_url: photo || null },
     };
 }

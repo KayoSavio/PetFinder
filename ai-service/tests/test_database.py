@@ -84,3 +84,12 @@ def test_post_details_and_pending(db, make_post):
 
     db.delete_embeddings(pid)
     assert db.get_embeddings_for_post(pid) == []
+
+
+def test_pending_lists_only_photos_without_embedding(db, make_post):
+    """Post com 2 fotos e só 1 processada volta para o batch, só com a foto que falta."""
+    pid = make_post("lost")
+    with db.get_pool().connection() as conn:
+        conn.execute("UPDATE posts SET photos = ARRAY['https://x/1.jpg', 'https://x/2.jpg'] WHERE id = %s", (pid,))
+    db.save_embedding(pid, "https://x/1.jpg", unit(0))
+    assert db.get_posts_without_embeddings() == [{"id": pid, "photos": ["https://x/2.jpg"]}]

@@ -33,7 +33,27 @@ describe('validateNewPost', () => {
     });
 });
 
+describe('validateNewPost — fotos e datas', () => {
+    const blob = (n: number) => `https://abc123.public.blob.vercel-storage.com/posts/${n}.jpg`;
+    it('só aceita fotos do Vercel Blob', () => {
+        expect(validateNewPost({ ...base, photos: ['https://evil.example.com/a.jpg'] })).toEqual({ ok: false, error: 'Foto inválida' });
+        expect(validateNewPost({ ...base, photos: ['https://public.blob.vercel-storage.com.evil.com/a.jpg'] }).ok).toBe(false);
+        expect(validateNewPost({ ...base, photos: [blob(1)] }).ok).toBe(true);
+    });
+    it('no máximo 5 fotos', () => {
+        expect(validateNewPost({ ...base, photos: [1, 2, 3, 4, 5, 6].map(blob) })).toEqual({ ok: false, error: 'Máximo de 5 fotos' });
+    });
+    it('rejeita data do evento inválida', () => {
+        expect(validateNewPost({ ...base, event_datetime: 'ontem' })).toEqual({ ok: false, error: 'Data inválida' });
+        expect(validateNewPost({ ...base, event_datetime: '2026-09-24T13:30:00.000Z' }).ok).toBe(true);
+    });
+});
+
 describe('validateNewSighting', () => {
+    it('rejeita data inválida e foto fora do Blob', () => {
+        expect(validateNewSighting({ lat: -23.5, lng: -46.6, note: 'x', datetime: 'amanhã' })).toEqual({ ok: false, error: 'Data inválida' });
+        expect(validateNewSighting({ lat: -23.5, lng: -46.6, note: 'x', photo_url: 'https://evil.example.com/a.jpg' })).toEqual({ ok: false, error: 'Foto inválida' });
+    });
     it('exige lat, lng e nota', () => {
         expect(validateNewSighting({ lat: -23.5, lng: -46.6 })).toEqual({ ok: false, error: 'Campo obrigatório: note' });
         expect(validateNewSighting({ lat: -23.5, lng: -46.6, note: 'vi na praça' }).ok).toBe(true);

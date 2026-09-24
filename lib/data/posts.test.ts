@@ -15,12 +15,12 @@ beforeEach(async () => {
 
 describe('posts', () => {
     it('cria e lê com tipos certos', async () => {
-        const created = await createPost(input({ photos: ['https://x/a.jpg'], color_tags: ['dourado'] }), null);
+        const created = await createPost(input({ photos: ['https://x.public.blob.vercel-storage.com/a.jpg'], color_tags: ['dourado'] }), null);
         const post = await getPost(created.id);
         expect(post).not.toBeNull();
         expect(post!.pin_lat).toBeCloseTo(-23.55, 5);
         expect(typeof post!.pin_lng).toBe('number');
-        expect(post!.photos).toEqual(['https://x/a.jpg']);
+        expect(post!.photos).toEqual(['https://x.public.blob.vercel-storage.com/a.jpg']);
         expect(post!.color_tags).toEqual(['dourado']);
         expect(post!.status).toBe('active');
         expect(typeof post!.created_at).toBe('string');

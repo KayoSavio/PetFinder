@@ -8,12 +8,13 @@ Endpoints:
   POST /embeddings/generate          — Gera embedding de uma foto (upload) e salva
   POST /embeddings/generate-from-url — Gera embedding a partir de URL e salva
   POST /match                        — Compara foto com posts ativos (+ filtro geográfico)
-  POST /embeddings/batch             — Gera embeddings para posts sem embedding
+  POST /embeddings/batch             — Gera embeddings das fotos que ainda não têm
   GET  /health                       — Healthcheck
 """
 
 import json
 from io import BytesIO
+from urllib.parse import urlparse
 
 import httpx
 from contextlib import asynccontextmanager
@@ -97,15 +98,36 @@ class AnalyzeResponse(BaseModel):
     confidence: Optional[float] = None
 
 
+# Fotos só vêm do Vercel Blob; qualquer outra URL é recusada (evita SSRF)
+BLOB_HOST_SUFFIX = ".public.blob.vercel-storage.com"
+MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024
+
+
+def _is_allowed_photo_url(photo_url: str) -> bool:
+    url = urlparse(photo_url)
+    return url.scheme == "https" and (url.hostname or "").endswith(BLOB_HOST_SUFFIX)
+
+
+def _client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=20)
+
+
 async def _download(photo_url: str) -> bytes:
-    async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.get(photo_url)
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Não foi possível baixar a imagem: HTTP {response.status_code}",
-        )
-    return response.content
+    if not _is_allowed_photo_url(photo_url):
+        raise HTTPException(status_code=400, detail="URL de foto não permitida")
+    try:
+        async with _client() as client:
+            async with client.stream("GET", photo_url) as response:
+                if response.status_code != 200:
+                    raise HTTPException(status_code=400, detail="Não foi possível baixar a imagem")
+                data = bytearray()
+                async for chunk in response.aiter_bytes():
+                    data.extend(chunk)
+                    if len(data) > MAX_DOWNLOAD_BYTES:
+                        raise HTTPException(status_code=400, detail="Imagem grande demais")
+    except httpx.HTTPError:
+        raise HTTPException(status_code=400, detail="Não foi possível baixar a imagem")
+    return bytes(data)
 
 
 # =====================
@@ -344,20 +366,20 @@ async def batch_generate_embeddings():
         processed = 0
         errors = []
 
-        async with httpx.AsyncClient() as client:
-            for post in posts:
-                post_id = post["id"]
-                for photo_url in post.get("photos", []):
+        for post in posts:
+            post_id = post["id"]
+            for photo_url in post.get("photos", []):
+                try:
                     try:
-                        response = await client.get(photo_url)
-                        if response.status_code != 200:
-                            errors.append(f"Erro ao baixar {photo_url}: HTTP {response.status_code}")
-                            continue
-                        result = process_image(response.content)
-                        save_embedding(post_id, photo_url, result["embedding"], result["species"])
-                        processed += 1
-                    except Exception as e:
-                        errors.append(f"Erro ao processar {photo_url}: {str(e)}")
+                        image_bytes = await _download(photo_url)
+                    except HTTPException as e:
+                        errors.append(f"Erro ao baixar {photo_url}: {e.detail}")
+                        continue
+                    result = process_image(image_bytes)
+                    save_embedding(post_id, photo_url, result["embedding"], result["species"])
+                    processed += 1
+                except Exception as e:
+                    errors.append(f"Erro ao processar {photo_url}: {str(e)}")
 
         return {
             "message": "Processamento concluído!",

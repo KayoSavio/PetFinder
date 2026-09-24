@@ -42,3 +42,28 @@ def test_analyze_samoyed_is_dog():
     with open(IMAGES / "samoyed_1.jpg", "rb") as f:
         r = client().post("/analyze", files={"file": ("s.jpg", f, "image/jpeg")})
     assert r.json()["species"] == "dog"
+
+
+def test_analyze_refuses_url_outside_blob():
+    """Evita que o serviço baixe endereços internos/arbitrários (SSRF)."""
+    for url in ("https://10.0.0.5/admin", "http://abc.public.blob.vercel-storage.com/a.jpg",
+                "https://public.blob.vercel-storage.com.evil.com/a.jpg"):
+        r = client().post("/analyze", data={"photo_url": url})
+        assert r.status_code == 400, url
+        assert r.json()["detail"] == "URL de foto não permitida"
+
+
+def test_download_caps_size(monkeypatch):
+    import asyncio
+
+    import httpx
+    import main
+
+    big = b"x" * (main.MAX_DOWNLOAD_BYTES + 1)
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, content=big))
+    monkeypatch.setattr(main, "_client", lambda: httpx.AsyncClient(transport=transport))
+    try:
+        asyncio.run(main._download("https://abc.public.blob.vercel-storage.com/a.jpg"))
+        raise AssertionError("deveria recusar")
+    except main.HTTPException as e:
+        assert e.status_code == 400 and "grande" in e.detail

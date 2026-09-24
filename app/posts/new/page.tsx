@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useReducer, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import PhotoUploader from '@/components/posts/PhotoUploader';
+import { isBusy, photoUrls, photosReducer } from '@/lib/photos/state';
 import type { PostType, PostUrgency } from '@/types';
 
 const STEPS = ['Tipo', 'Detalhes', 'Localização', 'Fotos', 'Contato', 'Revisar'];
@@ -11,6 +12,7 @@ const STEPS = ['Tipo', 'Detalhes', 'Localização', 'Fotos', 'Contato', 'Revisar
 export default function NewPostPage() {
     const router = useRouter();
     const [step, setStep] = useState(0);
+    const [photos, dispatchPhotos] = useReducer(photosReducer, { items: [] });
     const [submitting, setSubmitting] = useState(false);
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [formData, setFormData] = useState({
@@ -25,7 +27,6 @@ export default function NewPostPage() {
         pin_lat: -23.5505,
         pin_lng: -46.6333,
         search_radius_km: 5,
-        photos: [] as string[],
         contact_whatsapp: '',
         contact_phone: '',
     });
@@ -39,7 +40,7 @@ export default function NewPostPage() {
             case 0: return !!formData.type;
             case 1: return !!formData.title && !!formData.species;
             case 2: return true;
-            case 3: return true;
+            case 3: return !isBusy(photos); // espera as fotos terminarem de subir
             case 4: return !!formData.contact_whatsapp || !!formData.contact_phone;
             default: return true;
         }
@@ -54,6 +55,9 @@ export default function NewPostPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ...formData,
+                    photos: photoUrls(photos),
+                    // datetime-local não tem fuso: converte no navegador para ISO (UTC)
+                    event_datetime: formData.event_datetime ? new Date(formData.event_datetime).toISOString() : undefined,
                     base_lat: formData.type === 'help_request' ? formData.pin_lat : undefined,
                     base_lng: formData.type === 'help_request' ? formData.pin_lng : undefined,
                 }),
@@ -366,8 +370,8 @@ export default function NewPostPage() {
                             Adicione fotos do pet. Nós detectamos se é cachorro ou gato e usamos a foto para achar pets parecidos.
                         </p>
                         <PhotoUploader
-                            photos={formData.photos}
-                            onChange={photos => setFormData(f => ({ ...f, photos }))}
+                            state={photos}
+                            dispatch={dispatchPhotos}
                             onSpeciesDetected={species => setFormData(f => (f.species ? f : { ...f, species }))}
                         />
                     </div>

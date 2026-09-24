@@ -25,5 +25,5 @@ DEFAULT_MATCH_COUNT = 10            # Número máximo de matches retornados
 DEFAULT_MATCH_RADIUS_KM = 15       # Raio geográfico padrão da busca
 
 # Servidor
-HOST = os.getenv("AI_SERVICE_HOST", "0.0.0.0")
+HOST = os.getenv("AI_SERVICE_HOST", "127.0.0.1")   # só local; o serviço não tem autenticação
 PORT = int(os.getenv("AI_SERVICE_PORT", "8000"))
